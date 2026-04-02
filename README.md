@@ -1,6 +1,6 @@
-# Identificacion Ordenantes
+# Identificación de Ordenantes con Python
 
-Scripts en Python para consolidar archivos de Excel y generar la identificación de ordenantes a partir de descripciones de movimientos.
+Scripts en Python para consolidar archivos de Excel y generar la identificación de ordenantes en estados de cuentaa a partir de descripciones de movimientos.
 
 ## Archivos
 
@@ -26,7 +26,7 @@ OUTPUT_FILE = "C:\\Ruta\\Salida\\Resultado.xlsx"
 
 ```bash
 python script_concentrado.py
-python script_referencias.py
+python script_referenciado.py
 ```
 
 ## Requisitos
