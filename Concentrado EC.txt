@@ -1,0 +1,162 @@
+import os
+import pandas as pd
+from openpyxl import load_workbook
+from openpyxl.styles import NamedStyle
+
+# ==============================
+# CONFIGURACIÓN
+# ==============================
+INPUT_FOLDER = r"C:\Ruta\Entrada"          # <-- Modificar
+OUTPUT_FILE = r"C:\Ruta\Salida\Concentrado.xlsx"
+
+# ==============================
+# VARIABLES
+# ==============================
+consolidated_data = []
+omitted_files = []
+
+# Diccionario de meses (caso especial)
+MONTHS_MAP = {
+    "ENE": "01", "FEB": "02", "MAR": "03", "ABR": "04",
+    "MAY": "05", "JUN": "06", "JUL": "07", "AGO": "08",
+    "SEP": "09", "OCT": "10", "NOV": "11", "DIC": "12"
+}
+
+# ==============================
+# FUNCIONES
+# ==============================
+def convert_special_date(date_str):
+    """Convierte fechas tipo DD-MMM-YYYY a DD/MM/YYYY"""
+    try:
+        parts = str(date_str).split("-")
+        if len(parts) != 3:
+            return None
+
+        day, month, year = parts
+        month = month.upper()
+
+        if month not in MONTHS_MAP:
+            return None
+
+        return f"{day}/{MONTHS_MAP[month]}/{year}"
+    except:
+        return None
+
+
+def convert_general_date(date_str):
+    """Convierte fechas a formato estándar DD/MM/YYYY"""
+    try:
+        date_str = str(date_str)
+
+        # Correcciones comunes
+        if date_str.startswith("70/"):
+            date_str = date_str.replace("70/", "10/")
+        elif date_str.startswith("71/"):
+            date_str = date_str.replace("71/", "11/")
+
+        return pd.to_datetime(date_str, dayfirst=True).strftime("%d/%m/%Y")
+    except:
+        return None
+
+
+def validate_columns(df):
+    """Valida columnas necesarias"""
+    fecha_cols = ["Fecha", "Fecha Operación"]
+    concepto_cols = ["Concepto", "Descripción"]
+    monto_cols = ["Monto", "Monto Deposito", "Cargo/Abono"]
+
+    return (
+        any(col in df.columns for col in fecha_cols),
+        any(col in df.columns for col in concepto_cols),
+        any(col in df.columns for col in monto_cols),
+    )
+
+
+# ==============================
+# PROCESAMIENTO
+# ==============================
+for file_name in os.listdir(INPUT_FOLDER):
+
+    if not file_name.endswith(".xlsx"):
+        continue
+
+    file_path = os.path.join(INPUT_FOLDER, file_name)
+
+    try:
+        df = pd.read_excel(file_path)
+
+        has_fecha, has_concepto, has_monto = validate_columns(df)
+
+        if not (has_fecha and has_concepto and has_monto):
+            omitted_files.append({
+                "Archivo": file_name,
+                "Razon": "Columnas requeridas no encontradas"
+            })
+            continue
+
+        # Identificador (ej. banco)
+        source_name = file_name.split("_")[0]
+
+        # Construcción del dataset estándar
+        df_final = pd.DataFrame()
+        df_final["Origen"] = source_name
+        df_final["Fecha"] = df.get("Fecha", df.get("Fecha Operación"))
+        df_final["Concepto"] = df.get("Concepto", df.get("Descripción"))
+        df_final["Monto"] = (
+            df.get("Monto") or
+            df.get("Monto Deposito") or
+            df.get("Cargo/Abono")
+        )
+
+        # Caso especial
+        if source_name.lower() == "santander":
+            df_final["Fecha"] = df_final["Fecha"].apply(convert_special_date)
+
+        # Normalización general
+        df_final["Fecha"] = df_final["Fecha"].apply(convert_general_date)
+
+        # Limpiar nulos
+        df_final = df_final.dropna(subset=["Monto"])
+
+        consolidated_data.append(df_final)
+
+    except Exception as e:
+        omitted_files.append({
+            "Archivo": file_name,
+            "Razon": str(e)
+        })
+
+
+# ==============================
+# EXPORTAR RESULTADO
+# ==============================
+if consolidated_data:
+
+    final_df = pd.concat(consolidated_data, ignore_index=True)
+    final_df.to_excel(OUTPUT_FILE, index=False)
+
+    # Aplicar formato
+    wb = load_workbook(OUTPUT_FILE)
+    ws = wb.active
+
+    date_style = NamedStyle(name="date_style", number_format="DD/MM/YYYY")
+    number_style = NamedStyle(name="number_style", number_format="#,##0.00")
+
+    for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
+        row[1].style = date_style     # Fecha
+        row[3].style = number_style   # Monto
+
+    wb.save(OUTPUT_FILE)
+
+
+# ==============================
+# LOG DE ERRORES
+# ==============================
+if omitted_files:
+    log_path = os.path.join(INPUT_FOLDER, "archivos_omitidos.txt")
+
+    with open(log_path, "w") as f:
+        for item in omitted_files:
+            f.write(f"{item['Archivo']} - {item['Razon']}\n")
+
+print("Proceso finalizado.")
